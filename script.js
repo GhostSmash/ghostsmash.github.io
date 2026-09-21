@@ -890,7 +890,8 @@
     var PROMPT = "[" + T.user + "@" + T.host + " ~]$";
     var MAX_ROWS = 120;
     var isOpen = false, welcomed = false, history = [], hIdx = 0;
-    var closeTimer = null, openRect = null, openSize = "";
+    var closeTimer = null, openRect = null, openW = 0, openH = 0;
+    var COARSE = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
     var fxRunning = false, fxAbort = false;
 
     $("trigger-prompt").textContent = PROMPT;
@@ -989,20 +990,25 @@
       window.visualViewport.addEventListener("scroll", function () { if (isOpen) updateViewport(); });
     }
 
+    // The collapsed box sits 1px inside the trigger, so the trigger's own border stays visible as a rim.
+    // No clamping: the target must be exact, otherwise the terminal folds into the wrong rectangle.
     function clipFor(r) {
       var tr = tfs.getBoundingClientRect();
-      var top = Math.max(0, r.top - tr.top), left = Math.max(0, r.left - tr.left);
-      var right = Math.max(0, tr.right - r.right), bottom = Math.max(0, tr.bottom - r.bottom);
-      return "inset(" + top + "px " + right + "px " + bottom + "px " + left + "px round 16px)";
+      var top = r.top + 1 - tr.top, left = r.left + 1 - tr.left;
+      var right = tr.right - r.right + 1, bottom = tr.bottom - r.bottom + 1;
+      return "inset(" + top.toFixed(1) + "px " + right.toFixed(1) + "px " + bottom.toFixed(1) + "px " + left.toFixed(1) + "px round 15px)";
     }
 
     function open() {
       if (isOpen) return;
       isOpen = true;
       clearTimeout(closeTimer);
+      tfs.classList.remove("is-closing", "is-fast", "is-folding");
+      frame.style.opacity = "";
       updateViewport();
       openRect = trigger.getBoundingClientRect();           // measured at rest, before the page dissolves
-      openSize = window.innerWidth + "x" + window.innerHeight;
+      openW = window.innerWidth;
+      openH = window.innerHeight;                           // full height, keyboard not up yet
       tfs.hidden = false;
 
       if (reduceMotion) {
@@ -1033,7 +1039,7 @@
 
     function finishClose() {
       tfs.hidden = true;
-      tfs.classList.remove("is-open");
+      tfs.classList.remove("is-open", "is-closing", "is-fast", "is-folding");
       frame.style.opacity = "";
       frame.style.clipPath = "";
       document.documentElement.classList.remove("term-open");
@@ -1044,15 +1050,41 @@
       if (!isOpen) return;
       isOpen = false;
       if (fxRunning) fxAbort = true;
-      input.blur();
-      var rect = (openSize === window.innerWidth + "x" + window.innerHeight && openRect) ? openRect : trigger.getBoundingClientRect();
-      tfs.classList.remove("is-open");
-      document.body.classList.remove("is-terminal");        // the site comes back
+      input.blur();                                          // hides the on-screen keyboard
+      // Back to the full-size box at once: the collapse target is measured against it
+      tfs.style.removeProperty("--vv-h");
+      tfs.style.removeProperty("--vv-top");
+      clearTimeout(closeTimer);
+
+      var canShrink = !reduceMotion && !!openRect && Math.abs(window.innerWidth - openW) < 3;
+      tfs.classList.add("is-closing");
+      tfs.classList.toggle("is-fast", !canShrink);
+      tfs.classList.remove("is-open");                       // the text fades out first
+      document.body.classList.remove("is-terminal");         // the site comes back underneath
       if (pageEl) pageEl.removeAttribute("inert");
       trigger.setAttribute("aria-expanded", "false");
-      if (reduceMotion) { frame.style.opacity = "0"; }
-      else { frame.style.clipPath = clipFor(rect); }         // the terminal shrinks back into the line
-      closeTimer = setTimeout(finishClose, reduceMotion ? 230 : 650);
+
+      function shrink() {
+        if (isOpen) return;                                  // reopened in the meantime
+        if (canShrink) {
+          tfs.classList.add("is-folding");
+          frame.style.clipPath = clipFor(openRect);          // the terminal folds back into its line...
+          closeTimer = setTimeout(finishClose, 760);         // ...and cross-fades into the identical trigger
+        } else {
+          closeTimer = setTimeout(finishClose, 300);         // plain fade (reduced motion / rotated screen)
+        }
+      }
+      // Some browsers shrink the whole layout while the keyboard is up: wait until it is gone
+      if (canShrink && window.innerHeight < openH - 80) {
+        var tries = 0;
+        (function wait() {
+          if (isOpen) return;
+          if (window.innerHeight >= openH - 40 || ++tries > 12) shrink();
+          else closeTimer = setTimeout(wait, 40);
+        })();
+      } else {
+        shrink();
+      }
     }
 
     /* ---------------------------------------------------------------- commands */
@@ -1276,6 +1308,24 @@
       }
     }
 
+    // Drops focus (which hides the on-screen keyboard) and waits until the window has its full height back
+    async function hideKeyboard() {
+      input.blur();
+      var vv = window.visualViewport;
+      function keyboardUp() {
+        var visual = vv ? window.innerHeight - vv.height > 80 : false;      // keyboard overlays the page
+        var layout = openH > 0 && window.innerHeight < openH - 80;          // keyboard resized the page
+        return visual || layout;
+      }
+      var t0 = performance.now();
+      while (keyboardUp() && performance.now() - t0 < 900) {
+        await sleep(40);
+        if (fxAbort) return;
+      }
+      await sleep(60);                                       // let the last resize event land
+      updateViewport();
+    }
+
     async function runSecret() {
       if (reduceMotion) {                                     // no flashing for people who asked for calm
         BANNER_LARGE.forEach(function (l) { print(l, "term__key"); });
@@ -1285,14 +1335,21 @@
       fxRunning = true;
       fxAbort = false;
       input.disabled = true;
-      try { await playExplosion(); } catch (e) { /* aborted by tap / Esc / exit */ }
+      try {
+        await hideKeyboard();
+        if (fxAbort) throw new Error("abort");
+        // The effect plays inside the terminal window: below the title bar, over the text and buttons
+        var bar = tfs.querySelector(".tfs__bar");
+        tfs.style.setProperty("--bar-h", (bar ? bar.offsetHeight : 0) + "px");
+        await playExplosion();
+      } catch (e) { /* aborted by tap / Esc / exit */ }
       fx.hidden = true;
       fx.classList.remove("is-glitch");
       fx.textContent = "";
       fxRunning = false;
       input.disabled = false;
       out.textContent = "";                                   // after the blast the terminal is clean
-      if (isOpen) input.focus({ preventScroll: true });
+      if (isOpen && !COARSE) input.focus({ preventScroll: true });   // phones: keep the keyboard down until a tap
     }
     fx.addEventListener("pointerdown", function () { fxAbort = true; });
 
