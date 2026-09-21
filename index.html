@@ -19,8 +19,36 @@
   <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap" /></noscript>
 
   <link rel="stylesheet" href="./styles.css" />
+
+  <!-- config.js is needed this early only so the preloader can decide before the first paint -->
+  <script src="./config.js" charset="utf-8"></script>
+  <script>
+    (function () {
+      try {
+        var p = (window.SITE_CONFIG || {}).preloader || {};
+        if (p.enabled === false) return;
+        if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        var mode = p.mode || "session";
+        if (mode !== "always") {
+          var st = mode === "once" ? window.localStorage : window.sessionStorage;
+          if (st.getItem("smashh:preloaded") === "1") return;
+          st.setItem("smashh:preloaded", "1");
+        }
+        document.documentElement.classList.add("preload-on");
+      } catch (e) { /* storage blocked: skip the intro */ }
+    })();
+  </script>
 </head>
 <body>
+
+  <!-- Preloader: only visible when <html> has .preload-on (set in <head>) -->
+  <div class="preload" id="preload" role="status" aria-live="polite">
+    <button class="preload__skip" id="preload-skip" type="button">[ Skip ]</button>
+    <div class="preload__body">
+      <p class="preload__line"><span id="preload-text"></span><span class="preload__caret" aria-hidden="true"></span></p>
+      <p class="preload__hello" id="preload-hello"><span class="preload__wave" aria-hidden="true">&#128075;</span> <span id="preload-hello-text">Hello!</span></p>
+    </div>
+  </div>
 
   <!-- Background: wallpaper + adaptive shade + glow. Colors are derived from the wallpaper by script.js -->
   <div class="bg" aria-hidden="true">
@@ -37,6 +65,16 @@
       <article class="card profile" aria-labelledby="nick">
 
         <div class="profile__top">
+          <!-- Heart: outline = not sent yet, red glow = sent. Counter lives in Abacus (see config.js) -->
+          <button class="heart" id="heart" type="button" aria-pressed="false" aria-label="Send a heart">
+            <svg class="heart__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21s-8.5-5.2-9.7-10.6C1.4 6.6 3.9 4 7 4c2 0 3.600 1 5 3 1.400-2 3-3 5-3 3.100 0 5.600 2.600 4.700 6.400C20.500 15.800 12 21 12 21z" stroke-width="1.8" stroke-linejoin="round"/>
+            </svg>
+            <span class="sr-only">Hearts:</span>
+            <span id="heart-count">&mdash;</span>
+            <span class="heart__burst" aria-hidden="true"></span>
+          </button>
+
           <div class="views" id="views" title="Page views">
             <svg class="views__icon" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
@@ -61,42 +99,84 @@
           <li>smashhdev</li>
         </ul>
 
+        <!-- Status + owner's local time (text and offset come from config.js) -->
+        <div class="status" id="status">
+          <span class="status__dot" aria-hidden="true"></span>
+          <span class="status__text" id="status-text">just vibecoding &gt;_&lt;</span>
+          <span class="status__clock" id="status-clock">
+            <time id="local-time" datetime="">--:--</time>
+            <small id="local-tz">UTC+3</small>
+          </span>
+        </div>
+
         <hr class="rule" />
 
         <a class="handle" href="https://t.me/xssmash" target="_blank" rel="noopener noreferrer">@xssmash</a>
 
-        <p class="term" aria-label="Terminal: smashh at localhost runs whoami">
-          <span class="term__prompt" aria-hidden="true">[smashh@localhost ~]$</span>
-          <span class="term__cmd" aria-hidden="true">whoami</span><span class="term__cursor" aria-hidden="true"></span>
-        </p>
+        <!-- Terminal trigger: tapping it opens the fullscreen terminal (see #tfs below) -->
+        <button class="term-trigger" id="term-open" type="button" aria-haspopup="dialog" aria-controls="tfs" aria-label="Open terminal">
+          <span class="term-trigger__line">
+            <span class="term-trigger__prompt" id="trigger-prompt">[smashh@localhost ~]$</span>
+            <span class="term-trigger__cmd" id="trigger-cmd">whoami</span><span class="term-trigger__cursor" aria-hidden="true"></span>
+          </span>
+          <span class="term-trigger__hint" id="trigger-hint">tap to open terminal</span>
+        </button>
 
         <!-- Icons are the original brand glyphs (Simple Icons) and use currentColor, so they follow the theme accent -->
         <ul class="socials" aria-label="Social links">
           <li>
-            <a class="social" href="https://t.me/xssmash" target="_blank" rel="noopener noreferrer" aria-label="Telegram">
+            <a class="social" data-social="telegram" href="https://t.me/xssmash" target="_blank" rel="noopener noreferrer" aria-label="Telegram">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm4.962 7.224c.1-.002.321.023.465.14a.5.5 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024q-.159.037-5.061 3.345-.72.495-1.302.48c-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789q.04-.324.893-.663 5.247-2.286 6.998-3.014c3.332-1.386 4.025-1.627 4.476-1.635"/></svg>
             </a>
           </li>
           <li>
-            <a class="social" href="https://github.com/GhostSmash" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+            <a class="social" data-social="github" href="https://github.com/GhostSmash" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
             </a>
           </li>
           <li>
             <!-- Discord has no profile links by username: this button copies the username
                  (or opens the profile when discord.userId is set in config.js) -->
-            <button class="social" id="discord" type="button" data-copy="xssmash" aria-label="Discord: xssmash (tap to copy)">
+            <button class="social" data-social="discord" id="discord" type="button" data-copy="xssmash" aria-label="Discord: xssmash (tap to copy)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.317 4.37a19.8 19.8 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.3 18.3 0 0 0-5.487 0 13 13 0 0 0-.617-1.25.08.08 0 0 0-.079-.037A19.7 19.7 0 0 0 3.677 4.37a.1.1 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.08.08 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.08.08 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13 13 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10 10 0 0 0 .372-.292.07.07 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.07.07 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.3 12.3 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.08.08 0 0 0 .084.028 19.8 19.8 0 0 0 6.002-3.03.08.08 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03M8.02 15.33c-1.182 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418m7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418"/></svg>
             </button>
           </li>
           <li>
             <!-- 4PDA is not in the Simple Icons set, so it is drawn as a wordmark (still recolorable) -->
-            <a class="social social--word" href="https://4pda.to/forum/index.php?showuser=10297314" target="_blank" rel="noopener noreferrer" aria-label="4PDA profile">
+            <a class="social social--word" data-social="4pda" href="https://4pda.to/forum/index.php?showuser=10297314" target="_blank" rel="noopener noreferrer" aria-label="4PDA profile">
               <span class="wordmark" aria-hidden="true">4PDA</span>
             </a>
           </li>
         </ul>
       </article>
+
+      <!-- ============ Discord activity (Lanyard) ============ -->
+      <section class="card activity" id="activity" aria-label="Discord activity" hidden>
+        <div class="act__head">
+          <div class="act__avatar">
+            <img id="act-avatar" alt="" width="128" height="128" decoding="async" />
+            <span class="act__dot" id="act-dot" data-status="offline" aria-hidden="true"></span>
+          </div>
+          <div class="act__who">
+            <p class="act__name"><span id="act-name">Discord</span> <span class="act__state" id="act-state">offline</span></p>
+            <p class="act__custom" id="act-custom" hidden></p>
+          </div>
+        </div>
+
+        <div class="act__main" id="act-main" hidden>
+          <div class="act__art" id="act-art">
+            <img id="act-art-img" alt="" width="96" height="96" decoding="async" hidden />
+            <svg class="act__art-fallback" id="act-art-fb" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 6h10a5 5 0 0 1 4.900 4.100l.8 4.600a3.300 3.300 0 0 1-5.700 2.700L15 15.500H9L7 17.400a3.300 3.300 0 0 1-5.700-2.700l.8-4.600A5 5 0 0 1 7 6zm.5 3v1.500H6V12h1.500v1.500H9V12h1.500v-1.500H9V9zm8.800.8a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm2 2.200a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></svg>
+          </div>
+          <div class="act__text">
+            <p class="act__kind" id="act-kind">Playing</p>
+            <p class="act__title" id="act-title"></p>
+            <p class="act__sub" id="act-sub" hidden></p>
+            <p class="act__time" id="act-time" hidden></p>
+            <div class="act__bar" id="act-bar" hidden><i id="act-bar-fill"></i></div>
+          </div>
+        </div>
+      </section>
 
       <!-- ============ Music player ============ -->
       <section class="card player" id="player" aria-label="Music player">
@@ -130,10 +210,41 @@
     </div>
   </main>
 
+  <!-- Fullscreen terminal. Lives outside <main> so the page can dissolve behind it. -->
+  <div class="tfs" id="tfs" role="dialog" aria-modal="true" aria-label="Terminal" hidden>
+    <div class="tfs__frame" id="tfs-frame">
+      <header class="tfs__bar">
+        <span class="tfs__title" id="tfs-title">smashh@localhost: ~</span>
+        <button class="tfs__close" id="tfs-close" type="button" aria-label="Close terminal">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+
+      <div class="tfs__body" id="tfs-body">
+        <div class="tfs__out" id="term-out" role="log" aria-live="polite"></div>
+        <form class="tfs__line" id="term-form" autocomplete="off">
+          <label class="tfs__prompt" id="term-prompt" for="term-input">[smashh@localhost ~]$</label>
+          <span class="tfs__field">
+            <input class="tfs__input" id="term-input" type="text" enterkeyhint="go"
+                   autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"
+                   aria-label="Terminal command" />
+            <span class="tfs__cursor" aria-hidden="true"></span>
+          </span>
+        </form>
+      </div>
+
+      <footer class="tfs__foot">
+        <div class="term__chips" id="term-chips"></div>
+        <p class="tfs__hint">Type &quot;help&quot; to see commands or &quot;exit&quot;/&quot;close&quot; to return.</p>
+      </footer>
+
+      <pre class="tfs__fx" id="tfs-fx" aria-hidden="true" hidden></pre>
+    </div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <!-- Plain scripts only (no modules / fetch for local files) so it runs from file:// -->
-  <script src="./config.js" charset="utf-8"></script>
   <script src="./assets/site-data.js" charset="utf-8"></script>
   <script src="./script.js" charset="utf-8"></script>
 </body>
